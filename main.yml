@@ -1,0 +1,20 @@
+---
+- name: Wordpress installation
+  become: true
+  gather_facts: true
+  hosts: webservers
+
+  vars:
+    php_version: "8.3"
+
+
+  handlers:
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+  tasks:
+    - name: Install wordpress and dependencies
+      ansible.builtin.include_tasks: tasks/ubuntu-wordpress.yml
+      when: ansible_os_family == "Debian"

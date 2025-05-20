@@ -1,0 +1,249 @@
+---
+- name: Install nginx and certbot git htop Packages
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+    update_cache: true
+  loop:
+    - nginx
+    - certbot
+    - python3-certbot-nginx
+    - git
+    - htop
+
+- name: Install PHP and required extensions
+  ansible.builtin.package:
+    name:
+      - php-fpm
+      - php-mysql
+      - php-xml
+      - php-curl
+      - php-gd
+      - php-mbstring
+      - php-zip
+      - php-bcmath
+      - php-json
+      - php-pdo
+      - php-pear
+      - php-intl
+      - php-imagick
+    state: present
+    update_cache: true
+
+- name: Enable PHP-FPM service
+  ansible.builtin.service:
+    name: "php{{ php_version }}-fpm"
+    state: started
+    enabled: true
+
+- name: "Creating virtual hosts"
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  with_items:
+    - { src: "templates/nginx-virtualhost.tmpl", dest: "/etc/nginx/sites-available/{{ domain }}" }
+  tags:
+    - lemp
+    - wordpress
+  notify:
+    - Restart Nginx
+
+- name: "Add external http nginx conf symlink"
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ domain }}"
+    dest: "/etc/nginx/sites-enabled/{{ domain }}"
+    state: link
+  tags:
+    - lemp
+    - wordpress
+  notify:
+    - Restart Nginx
+
+
+- name: "Installing mariadb and python package"
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - mariadb-server
+    - python3-pymysql
+    - mariadb-client
+
+
+- name: "Updating root password"
+  mysql_user:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: "root"
+    login_password: ""
+    name: "root"
+    password: "{{ mysql_root_password }}"
+    host: "localhost"
+  failed_when: false
+  tags:
+    - lemp
+    - wordpress
+    - mysql
+
+- name: Ensure .my.cnf exists with MySQL credentials
+  ansible.builtin.copy:
+    content: |
+      [client]
+      user=root
+      password={{ mysql_root_password }}
+    dest: /root/.my.cnf
+    owner: root
+    group: root
+    mode: '0600'
+  tags:
+    - lemp
+    - wordpress
+    - mysql
+
+- name: "Removing anonymous users"
+  mysql_user:
+    login_user: "root"
+    login_password: "{{ mysql_root_password }}"
+    name: ""
+    password: ""
+    host_all: true
+    state: absent
+  tags:
+    - wordpress
+    - lemp
+    - mysql
+
+- name: "Creating database"
+  mysql_db:
+    login_user: "root"
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_db }}"
+    state: present
+  tags:
+    - lemp
+    - wordpress
+    - mysql
+
+- name: "Creating user"
+  mysql_user:
+    login_user: "root"
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_user }}"
+    password: "{{ mysql_password }}"
+    state: present
+    host: "%"
+    priv: "{{ mysql_db }}.*:ALL"
+  tags:
+    - wordpress
+    - mysql
+    - lemp
+
+- name: "Check if WordPress archive exists"
+  ansible.builtin.stat:
+    path: "/tmp/wordpress.tar.gz"
+  register: wordpress_archive
+
+- name: "Downloading WordPress files"
+  ansible.builtin.get_url:
+    url: "{{ wordpress_url }}"
+    dest: "/tmp/wordpress.tar.gz"
+    mode: "0644"
+  when: not wordpress_archive.stat.exists
+  tags:
+    - wordpress
+    - lemp
+    - mysql
+
+- name: "Check if WordPress is already extracted"
+  ansible.builtin.stat:
+    path: "/tmp/wordpress"
+  register: wordpress_extracted
+
+- name: "Extracting files"
+  ansible.builtin.unarchive:
+    src: "/tmp/wordpress.tar.gz"
+    dest: "/tmp/"
+    remote_src: true
+  when: not wordpress_extracted.stat.exists
+  tags:
+    - lemp
+    - mysql
+    - wordpress
+
+- name: "Copying website files"
+  ansible.builtin.copy:
+    src: "/tmp/wordpress/"
+    dest: "/var/www/{{ domain }}"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    remote_src: true
+    mode: "0644"
+
+- name: "Set permissions of document root"
+  ansible.builtin.file:
+    path: "/var/www/{{ domain }}"
+    state: directory
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: "0755"
+
+- name: "Setting up wp-config"
+  ansible.builtin.template:
+    src: templates/wp-config.php.tmpl
+    dest: "/var/www/{{ domain }}/wp-config.php"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: "0644"
+
+- name: "Restarting services"
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: restarted
+    enabled: true
+  loop:
+    - nginx
+    - mysql
+  tags:
+    - nginx
+    - mysql
+
+
+# This isn't needed when using orbstack linux machines since it automatically creates ssl certs
+
+# - name: Run certbot
+#   ansible.builtin.command: >
+#     certbot --nginx -d {{ domain }}  --agree-tos -m {{ letsencrypt_email }}
+#     creates=/etc/letsencrypt/live/{{ domain }}/chain.pem
+#   register: certbot_status
+#   notify: Restart Nginx
+
+# - name: Test certbot renewal
+#   ansible.builtin.command:
+#     certbot renew --dry-run
+#   register: certbot_renewal
+#   failed_when: certbot_renewal.rc != 0
+
+# - name: Cronjob for certbot
+#   ansible.builtin.cron:
+#     name: letsencrypt_renewal
+#     special_time: weekly
+#     cron_file: certbot_renewal
+#     user: root
+#     job: "/bin/bash -lc '/usr/local/bin/certbot -q renew'"
+#   notify: Restart Nginx
+
+# - name: "Creating HTTPS virtual hosts"
+#   ansible.builtin.template:
+#     src: "{{ item.src }}"
+#     dest: "{{ item.dest }}"
+#     mode: "0644"
+#   with_items:
+#     - { src: "templates/nginx-virtualhost-ssl.tmpl", dest: "/etc/nginx/sites-available/{{ domain }}-ssl" }
+
+# - name: "Add external https nginx conf symlink"
+#   ansible.builtin.file:
+#     src: "/etc/nginx/sites-available/{{ domain }}-ssl"
+#     dest: "/etc/nginx/sites-enabled/{{ domain }}-ssl"
+#     state: link
+#   notify:
+#     - Restart Nginx

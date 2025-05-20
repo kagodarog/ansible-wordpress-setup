@@ -1,0 +1,16 @@
+---
+owner: www-data
+group: www-data
+domain: ubuntu.orb.local
+mysql_root_password: 'root'
+mysql_database: 'ea_masterclass'
+mysql_user: 'ea_masterclas_user_'
+mysql_password: 'w3d2WR34@2swd3reqa'
+mysql_db: 'ea_wordpress'
+wordpress_url: https://wordpress.org/wordpress-6.8.1.tar.gz
+webserver_port: 80
+webserver_port_secure: 443
+tls_dir: /etc/letsencrypt/live/
+cert_file: "{{ domain }}/fullchain.pem"
+key_file: "{{ domain }}/privkey.pem"
+letsencrypt_email: kagodarog@gmail.com
