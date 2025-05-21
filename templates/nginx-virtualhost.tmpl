@@ -1,26 +1,32 @@
 server {
-listen "{{ webserver_port }}";
-root "/var/www/{{ domain }}";
-index index.php index.html index.htm;
-error_log /var/log/nginx/{{ domain }}.error;
-access_log /var/log/nginx/{{ domain }}.access;
-server_name "{{ domain }}";
-server_tokens off;
-location ~ \.php$ {
-    if ($http_x_forwarded_proto = 'https') {
-        set $fe_https 'on';
+  listen "{{ webserver_port }}";
+  root "/var/www/{{ domain }}";
+  index index.php index.html index.htm;
+  error_log /var/log/nginx/{{ domain }}.error;
+  access_log /var/log/nginx/{{ domain }}.access;
+  server_name "{{ domain }}";
+  server_tokens off;
+  location ~ \.php$ {
+      if ($http_x_forwarded_proto = 'https') {
+          set $fe_https 'on';
+      }
+      fastcgi_param HTTPS $fe_https;
+      include snippets/fastcgi-php.conf;
+      fastcgi_pass unix:/var/run/php/php8.3-fpm.sock;
     }
-    fastcgi_param HTTPS $fe_https;
-    include snippets/fastcgi-php.conf;
-    fastcgi_pass unix:/var/run/php/php8.3-fpm.sock;
+
+  location ~ /\.ht {
+        deny all;
+    }
+
+  location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+      expires max;
+      log_not_found off;
   }
 
-#location ~ /\.ht {
-#      deny all;
-#   }
-
-#location / {
-#    try_files $uri $uri/ =404;
-#    return 301 https://$host$request_uri;
-#    }
+  location = /robots.txt {
+      allow all;
+      log_not_found off;
+      access_log off;
+  }
 }
